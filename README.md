@@ -17,15 +17,15 @@
 > [!WARNING]
 > 如果你：
 >
-> - 发现了 Bug，请[提交 Issue](https://github.com/RUCICS/LinkLab-2024-Assignment/issues)
-> - 有任何 Question，请在[讨论区](https://github.com/RUCICS/LinkLab-2024-Assignment/discussions)提出
+> - 发现了 Bug，请[提交 Issue](https://github.com/RUCICS/LinkLab-2025/issues)
+> - 有任何 Question，请在[讨论区](https://github.com/RUCICS/LinkLab-2025/discussions)提出
 >
 > 也欢迎你积极参与开源协作，改进框架代码解决 Issue、或是为同学们答疑解惑。这部分的表现可被计为[额外的分数](#评分标准)。
 
 > [!NOTE]
 > 本实验预计耗时 10 - 20 个小时，具体情况因个体差异可能有所区别。
 
-[![GitHub Issues](https://img.shields.io/github/issues/RUCICS/LinkLab-2024-Assignment?style=for-the-badge&logo=github)](https://github.com/RUCICS/LinkLab-2024-Assignment/issues)
+[![GitHub Issues](https://img.shields.io/github/issues/RUCICS/LinkLab-2025?style=for-the-badge&logo=github)](https://github.com/RUCICS/LinkLab-2025/issues)
 
 ## 什么是链接？
 

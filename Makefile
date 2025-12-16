@@ -114,15 +114,18 @@ test_2: all
 	python3 grader.py --group basic_linking
 
 test_3: all
-	python3 grader.py --group relative_reloc
+	python3 grader.py --group relocations
 
 test_4: all
 	python3 grader.py --group symbol_resolution
 
 test_5: all
-	python3 grader.py --group addr64
+	python3 grader.py --group multi_segment
 
 test_6: all
+	python3 grader.py --group ro_segment
+
+test_7: all
 	python3 grader.py --group section_perm
 
 test_8: all
@@ -131,4 +134,4 @@ test_8: all
 retest: all
 	python3 grader.py -f
 
-.PHONY: all clean test show_info test_1 test_2 test_3 test_4 test_5 test_6 test_8 retest config
+.PHONY: all clean test show_info test_1 test_2 test_3 test_4 test_5 test_6 test_7 test_8 retest config

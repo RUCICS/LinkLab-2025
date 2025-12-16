@@ -1,0 +1,33 @@
+[meta]
+name = "Multi-Segment Layout Test"
+description = "Verify that the linker separates Code and Data into at least two segments."
+score = 10
+
+[[run]]
+name = "Compile Rick"
+command = "${root_dir}/cc"
+args = ["${test_dir}/rick.c", "-o", "${build_dir}/rick.o", "-g"]
+[run.check]
+return_code = 0
+files = ["${build_dir}/rick.fle"]
+
+[[run]]
+name = "Link Rick"
+command = "${root_dir}/ld"
+args = [
+    "${build_dir}/rick.fle",
+    "${common_dir}/minilibc.fle",
+    "-o",
+    "${build_dir}/program",
+]
+[run.check]
+return_code = 0
+files = ["${build_dir}/program"]
+
+[[run]]
+name = "Verify Segments"
+command = "echo"                # Dummy command
+args = ["Checking segments..."]
+score = 10
+[run.check]
+special_judge = "judge.py"

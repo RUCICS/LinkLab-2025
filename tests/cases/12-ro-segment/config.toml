@@ -1,0 +1,33 @@
+[meta]
+name = "Read-Only Segment Test"
+description = "Verify that the linker facilitates a Read-Only Segment for constants."
+score = 10
+
+[[run]]
+name = "Compile Cake"
+command = "${root_dir}/cc"
+args = ["${test_dir}/cake.c", "-o", "${build_dir}/cake.o", "-g"]
+[run.check]
+return_code = 0
+files = ["${build_dir}/cake.fle"]
+
+[[run]]
+name = "Link Cake"
+command = "${root_dir}/ld"
+args = [
+    "${build_dir}/cake.fle",
+    "${common_dir}/minilibc.fle",
+    "-o",
+    "${build_dir}/program",
+]
+[run.check]
+return_code = 0
+files = ["${build_dir}/program"]
+
+[[run]]
+name = "Verify Layout"
+command = "echo"
+args = ["Checking layout..."]
+score = 10
+[run.check]
+special_judge = "judge.py"

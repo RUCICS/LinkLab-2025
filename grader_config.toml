@@ -53,16 +53,19 @@ nm = ["1"]
 basic_linking = ["2", "3"]
 
 # 任务三：相对重定位
-relative_reloc = ["4", "5"]
+relocations = ["4", "5", "6"]
 
 # 任务四：处理符号冲突
-symbol_resolution = ["6", "7", "8", "9"]
+symbol_resolution = ["7", "8", "9", "10"]
 
-# 任务五：处理 64 位地址
-addr64 = ["10"]
+# 任务五：多段内存布局
+multi_segment = ["11"]
 
-# 任务六：分离代码和数据
-section_perm = ["11", "12"]
+# 任务六：只读数据段
+ro_segment = ["12"]
+
+# 任务七：段权限
+section_perm = ["13", "14"]
 
 # 任务八：静态链接库
-static_linking = ["13"]
+static_linking = ["15", "16"]

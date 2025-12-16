@@ -1,5 +1,5 @@
 [meta]
-name = "Position Independent Executable Test"
+name = "PC-Relative Addressing Test"
 description = "Test compilation and linking with -fPIE option, using a complex math library"
 score = 10
 

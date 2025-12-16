@@ -1,0 +1,106 @@
+[meta]
+name = "Complex Static Linking Test"
+description = "Test circular deps, chains, and selective linking"
+score = 10
+
+[[run]]
+name = "Compile unused"
+command = "${root_dir}/cc"
+args = ["${test_dir}/unused.c", "-o", "${build_dir}/unused.o", "-I${common_dir}", "-g", "-Os"]
+[run.check]
+files = ["${build_dir}/unused.fle"]
+return_code = 0
+
+[[run]]
+name = "Compile used"
+command = "${root_dir}/cc"
+args = ["${test_dir}/used.c", "-o", "${build_dir}/used.o", "-I${common_dir}", "-g", "-Os"]
+[run.check]
+files = ["${build_dir}/used.fle"]
+return_code = 0
+
+[[run]]
+name = "Compile ping"
+command = "${root_dir}/cc"
+args = ["${test_dir}/ping.c", "-o", "${build_dir}/ping.o", "-I${common_dir}", "-g", "-Os"]
+[run.check]
+files = ["${build_dir}/ping.fle"]
+return_code = 0
+
+[[run]]
+name = "Compile pong"
+command = "${root_dir}/cc"
+args = ["${test_dir}/pong.c", "-o", "${build_dir}/pong.o", "-I${common_dir}", "-g", "-Os"]
+[run.check]
+files = ["${build_dir}/pong.fle"]
+return_code = 0
+
+[[run]]
+name = "Compile chain_a"
+command = "${root_dir}/cc"
+args = ["${test_dir}/chain_a.c", "-o", "${build_dir}/chain_a.o", "-I${common_dir}", "-g", "-Os"]
+[run.check]
+files = ["${build_dir}/chain_a.fle"]
+return_code = 0
+
+[[run]]
+name = "Compile chain_b"
+command = "${root_dir}/cc"
+args = ["${test_dir}/chain_b.c", "-o", "${build_dir}/chain_b.o", "-I${common_dir}", "-g", "-Os"]
+[run.check]
+files = ["${build_dir}/chain_b.fle"]
+return_code = 0
+
+[[run]]
+name = "Create archive"
+command = "${root_dir}/ar"
+args = [
+    "${build_dir}/libcomplex.a",
+    "${build_dir}/unused.fle",
+    "${build_dir}/used.fle",
+    "${build_dir}/ping.fle",
+    "${build_dir}/pong.fle",
+    "${build_dir}/chain_a.fle",
+    "${build_dir}/chain_b.fle"
+]
+[run.check]
+files = ["${build_dir}/libcomplex.a"]
+return_code = 0
+
+[[run]]
+name = "Compile main"
+command = "${root_dir}/cc"
+args = ["${test_dir}/main.c", "-o", "${build_dir}/main.o", "-I${common_dir}", "-g", "-Os"]
+[run.check]
+files = ["${build_dir}/main.fle"]
+return_code = 0
+
+[[run]]
+name = "Link program"
+command = "${root_dir}/ld"
+args = [
+    "${build_dir}/main.fle",
+    "${build_dir}/libcomplex.a",
+    "${common_dir}/minilibc.fle",
+    "-o",
+    "${build_dir}/program"
+]
+[run.check]
+files = ["${build_dir}/program"]
+return_code = 0
+
+[[run]]
+name = "Execute program"
+command = "${root_dir}/exec"
+args = ["${build_dir}/program"]
+score = 5
+[run.check]
+return_code = 0
+
+[[run]]
+name = "Verify unused module exclusion"
+command = "echo" 
+args = ["verifying"]
+score = 5
+[run.check]
+special_judge = "judge.py"
