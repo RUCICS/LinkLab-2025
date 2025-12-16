@@ -22,5 +22,6 @@ readelf
 .autograder_result
 .last_cxxflags
 .test_history
+.last_build_config
 
 __pycache__
