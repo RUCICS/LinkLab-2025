@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <map>
 #include <stdexcept>
 #include <sys/mman.h>
@@ -23,6 +24,91 @@ struct LoadedModule {
 // Order: Main Execution -> Dependency 1 -> Dependency 2 ...
 std::vector<LoadedModule> loaded_modules;
 std::unordered_set<std::string> loaded_module_names;
+
+// Flag: true if any SO has PC32 dyn_relocs (requires all SOs in low address space)
+bool need_low_address = false;
+std::unordered_set<std::string> scanned_names;
+
+// Helper to load FLE from file (searches FLE_LIBRARY_PATH)
+FLEObject load_fle_with_path(const std::string& filename)
+{
+    // Try direct path
+    try {
+        return load_fle(filename);
+    } catch (...) {
+    }
+
+    try {
+        return load_fle(filename + ".fle");
+    } catch (...) {
+    }
+
+    // Search in FLE_LIBRARY_PATH
+    const char* lib_path_env = std::getenv("FLE_LIBRARY_PATH");
+    if (lib_path_env != nullptr) {
+        std::string lib_path(lib_path_env);
+        std::string basename = filename;
+        size_t last_slash = filename.rfind('/');
+        if (last_slash != std::string::npos) {
+            basename = filename.substr(last_slash + 1);
+        }
+
+        std::vector<std::string> paths;
+        size_t start = 0;
+        size_t end = lib_path.find(':');
+        while (end != std::string::npos) {
+            if (end > start)
+                paths.push_back(lib_path.substr(start, end - start));
+            start = end + 1;
+            end = lib_path.find(':', start);
+        }
+        if (start < lib_path.size())
+            paths.push_back(lib_path.substr(start));
+
+        for (const auto& path : paths) {
+            try {
+                return load_fle(path + "/" + basename);
+            } catch (...) {
+            }
+            try {
+                return load_fle(path + "/" + filename);
+            } catch (...) {
+            }
+        }
+    }
+    throw std::runtime_error("Could not load: " + filename);
+}
+
+// Pre-scan dependencies to check if any SO has PC32 dyn_relocs
+void scan_dependencies_recursive(const std::string& filename)
+{
+    if (scanned_names.count(filename))
+        return;
+
+    FLEObject obj;
+    try {
+        obj = load_fle_with_path(filename);
+    } catch (...) {
+        return; // Will fail later during actual load
+    }
+
+    scanned_names.insert(filename);
+
+    // Check for PC32 dyn_relocs
+    if (obj.type == ".so") {
+        for (const auto& reloc : obj.dyn_relocs) {
+            if (reloc.type == RelocationType::R_X86_64_PC32) {
+                need_low_address = true;
+                break;
+            }
+        }
+    }
+
+    // Recurse into dependencies
+    for (const auto& dep : obj.needed) {
+        scan_dependencies_recursive(dep);
+    }
+}
 
 // Helper to resolve a symbol across all loaded modules
 uint64_t resolve_symbol(const std::string& name)
@@ -48,16 +134,74 @@ void load_module_recursive(const std::string& filename)
     }
 
     // Load FLE file
-    // Handle potential .fle extension issues if filenames in 'needed' lack it
+    // Try direct path first, then search in FLE_LIBRARY_PATH
     FLEObject obj;
+    bool loaded = false;
+
+    // Try direct path
     try {
         obj = load_fle(filename);
+        loaded = true;
     } catch (...) {
+        // Try with extensions
         try {
             obj = load_fle(filename + ".fle");
+            loaded = true;
         } catch (...) {
-            throw std::runtime_error("Could not load dependency: " + filename);
+            // Continue to search in library path
         }
+    }
+
+    // If not found, search in FLE_LIBRARY_PATH
+    if (!loaded) {
+        const char* lib_path_env = std::getenv("FLE_LIBRARY_PATH");
+        if (lib_path_env != nullptr) {
+            std::string lib_path(lib_path_env);
+            std::string basename = filename;
+            // Extract basename from path if it contains directory separators
+            size_t last_slash = filename.rfind('/');
+            if (last_slash != std::string::npos) {
+                basename = filename.substr(last_slash + 1);
+            }
+
+            // Split FLE_LIBRARY_PATH by ':'
+            std::vector<std::string> paths;
+            size_t start = 0;
+            size_t end = lib_path.find(':');
+            while (end != std::string::npos) {
+                if (end > start) {
+                    paths.push_back(lib_path.substr(start, end - start));
+                }
+                start = end + 1;
+                end = lib_path.find(':', start);
+            }
+            if (start < lib_path.size()) {
+                paths.push_back(lib_path.substr(start));
+            }
+
+            // Try each path
+            for (const auto& path : paths) {
+                std::string full_path = path + "/" + basename;
+                try {
+                    obj = load_fle(full_path);
+                    loaded = true;
+                    break;
+                } catch (...) {
+                    // Try original filename (maybe it's a relative path)
+                    try {
+                        obj = load_fle(path + "/" + filename);
+                        loaded = true;
+                        break;
+                    } catch (...) {
+                        // Continue searching
+                    }
+                }
+            }
+        }
+    }
+
+    if (!loaded) {
+        throw std::runtime_error("Could not load dependency: " + filename);
     }
 
     loaded_module_names.insert(filename);
@@ -90,8 +234,21 @@ void load_module_recursive(const std::string& filename)
 
         if (has_segments) {
             uint64_t total_size = max_end;
-            // Reserve memory region
-            void* addr = mmap(NULL, total_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+            void* addr;
+            if (need_low_address) {
+                // Use MAP_32BIT for PC32 text relocations (can only reach ±2GB)
+                std::cerr << "Warning: Loading " << filename << " into low 32-bit address space due to PC32 relocations." << std::endl;
+                addr = mmap(NULL, total_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+                if (addr == MAP_FAILED) {
+                    // Fallback without MAP_32BIT
+                    addr = mmap(NULL, total_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                }
+            } else {
+                // PIC code (GOT/PLT with R_X86_64_64) can be loaded anywhere
+                addr = mmap(NULL, total_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            }
+
             if (addr == MAP_FAILED) {
                 throw std::runtime_error("Failed to reserve memory for shared library");
             }
@@ -155,6 +312,14 @@ void FLE_exec(const FLEObject& obj)
     // Clear globals for fresh execution
     loaded_modules.clear();
     loaded_module_names.clear();
+    scanned_names.clear();
+    need_low_address = false;
+
+    // Pre-scan all dependencies to check if any SO has PC32 dyn_relocs
+    // This must be done BEFORE loading so we know whether to use MAP_32BIT
+    for (const auto& dep : obj.needed) {
+        scan_dependencies_recursive(dep);
+    }
 
     // 1. Load Main Executable (Manual setup for the main object provided)
     // We treat the passed object as the first module but we need its name.
@@ -205,13 +370,21 @@ void FLE_exec(const FLEObject& obj)
     // 2. Perform Relocations for ALL modules
     for (auto& mod : loaded_modules) {
 
-        // Helper lambda to apply a single relocation
-        auto apply_reloc = [&](const Relocation& reloc, uint64_t section_base_vaddr) {
-            uint64_t sym_addr = resolve_symbol(reloc.symbol);
-            uint64_t reloc_addr = mod.load_base + section_base_vaddr + reloc.offset;
+        // A. Dynamic Relocations (Bonus 1 - Text Relocations for SO, Bonus 2 - GOT for EXE)
+        // For .so: dyn_relocs.offset is relative to merged section data (typically .text)
+        // For .exe: dyn_relocs.offset is VMA (already resolved during linking)
+        for (const auto& reloc : mod.obj.dyn_relocs) {
+            uint64_t reloc_addr;
 
-            // Check if reloc_addr is valid memory?
-            // Ideally we should check, but assuming correctness of ELF/FLE
+            if (mod.obj.type == ".exe") {
+                // For executables, offset is the VMA
+                reloc_addr = reloc.offset;
+            } else {
+                // For shared objects, offset is VMA relative to Load Base
+                reloc_addr = mod.load_base + reloc.offset;
+            }
+
+            uint64_t sym_addr = resolve_symbol(reloc.symbol);
 
             switch (reloc.type) {
             case RelocationType::R_X86_64_64:
@@ -227,19 +400,10 @@ void FLE_exec(const FLEObject& obj)
                 // S + A - P
                 *(uint32_t*)reloc_addr = (uint32_t)(sym_addr + reloc.addend - reloc_addr);
                 break;
+            case RelocationType::R_X86_64_GOTPCREL:
+                *(uint32_t*)reloc_addr = (uint32_t)(sym_addr + reloc.addend - reloc_addr);
+                break;
             }
-        };
-
-        // A. Dynamic Relocations (Bonus 2 - GOT)
-        // These are typically absolute relocations in the GOT section
-        // dyn_relocs have offset relative to load_base?
-        // In FLE, headers are segments. dyn_relocs usually point to GOT which is in a segment.
-        // Assuming reloc.offset is VMA.
-        for (const auto& reloc : mod.obj.dyn_relocs) {
-            // For dynamic relocs, offset is usually VMA.
-            // So address is load_base + offset.
-            // pass 0 as section_base since offset includes it.
-            apply_reloc(reloc, 0);
         }
 
         // B. Section Relocations (Bonus 1 - Text Relocations)
@@ -285,6 +449,9 @@ void FLE_exec(const FLEObject& obj)
                     *(int32_t*)reloc_addr = (int32_t)(sym_addr + reloc.addend);
                     break;
                 case RelocationType::R_X86_64_PC32:
+                    *(uint32_t*)reloc_addr = (uint32_t)(sym_addr + reloc.addend - reloc_addr);
+                    break;
+                case RelocationType::R_X86_64_GOTPCREL:
                     *(uint32_t*)reloc_addr = (uint32_t)(sym_addr + reloc.addend - reloc_addr);
                     break;
                 }

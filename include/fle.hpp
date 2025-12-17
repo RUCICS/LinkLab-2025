@@ -234,20 +234,6 @@ public:
         result["needed"] = needed;
     }
 
-    void write_dynamic_relocs(const std::vector<Relocation>& relocs)
-    {
-        json relocs_json = json::array();
-        for (const auto& reloc : relocs) {
-            json reloc_json;
-            reloc_json["type"] = reloc.type;
-            reloc_json["offset"] = reloc.offset;
-            reloc_json["symbol"] = reloc.symbol;
-            reloc_json["addend"] = reloc.addend;
-            relocs_json.push_back(reloc_json);
-        }
-        result["dyn_relocs"] = relocs_json;
-    }
-
 private:
     std::string current_section;
     json result;

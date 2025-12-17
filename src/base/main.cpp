@@ -97,11 +97,11 @@ static void parse_section_headers(const json& j, FLEObject& obj)
 // 辅助函数：解析重定位类型
 static RelocationType parse_relocation_type(const std::string& type_str)
 {
-    if (type_str == "rel")
+    if (type_str == "rel" || type_str == "dynrel")
         return RelocationType::R_X86_64_PC32;
-    if (type_str == "abs64")
+    if (type_str == "abs64" || type_str == "dynabs64")
         return RelocationType::R_X86_64_64;
-    if (type_str == "abs")
+    if (type_str == "abs" || type_str == "dynabs32" || type_str == "abs32")
         return RelocationType::R_X86_64_32;
     if (type_str == "abs32s")
         return RelocationType::R_X86_64_32S;
@@ -109,6 +109,25 @@ static RelocationType parse_relocation_type(const std::string& type_str)
         return RelocationType::R_X86_64_GOTPCREL;
     throw std::runtime_error("Invalid relocation type: " + type_str);
 }
+static int64_t parse_addend_literal(std::string literal)
+{
+    literal = trim(literal);
+    if (literal.empty()) {
+        throw std::runtime_error("Empty relocation addend");
+    }
+
+    if (literal.size() > 2 && literal[0] == '0' && (literal[1] == 'x' || literal[1] == 'X')) {
+        literal = literal.substr(2);
+    }
+
+    try {
+        return std::stoll(literal, nullptr, 16);
+    } catch (const std::invalid_argument&) {
+        return std::stoll(literal, nullptr, 10);
+    }
+}
+
+
 
 static FLEObject parse_fle_from_json(const json& j, const std::string& name)
 {
@@ -137,13 +156,36 @@ static FLEObject parse_fle_from_json(const json& j, const std::string& name)
         parse_program_headers(j, obj);
     }
 
+    // 如果是共享库，读取程序头
+    if (obj.type == ".so") {
+        parse_program_headers(j, obj);
+    }
+
+    // 读取依赖库列表（可执行文件和共享库都可能有）
+    if (j.contains("needed")) {
+        for (const auto& lib : j["needed"]) {
+            obj.needed.push_back(lib.get<std::string>());
+        }
+    }
+
+    std::vector<Relocation> legacy_dyn_relocs;
+    std::vector<Relocation> inline_dyn_relocs;
+
     parse_section_headers(j, obj);
 
     std::unordered_map<std::string, Symbol> symbol_table;
+    std::unordered_map<std::string, uint64_t> section_base_addrs;
+
+    for (const auto& shdr : obj.shdrs) {
+        section_base_addrs[shdr.name] = shdr.addr;
+    }
+    for (const auto& phdr : obj.phdrs) {
+        section_base_addrs.emplace(phdr.name, phdr.vaddr);
+    }
 
     // 第一遍：收集所有符号定义并计算偏移量
     for (auto& [key, value] : j.items()) {
-        if (key == "type" || key == "entry" || key == "phdrs" || key == "shdrs" || key == "members" || key == "name")
+        if (key == "type" || key == "entry" || key == "phdrs" || key == "shdrs" || key == "members" || key == "name" || key == "needed" || key == "dyn_relocs")
             continue;
 
         // size_t current_offset = 0;
@@ -179,7 +221,7 @@ static FLEObject parse_fle_from_json(const json& j, const std::string& name)
 
     // 第二遍：处理节的内容和重定位
     for (auto& [key, value] : j.items()) {
-        if (key == "type" || key == "entry" || key == "phdrs" || key == "shdrs" || key == "members" || key == "name")
+        if (key == "type" || key == "entry" || key == "phdrs" || key == "shdrs" || key == "members" || key == "name" || key == "needed" || key == "dyn_relocs")
             continue;
 
         FLESection section;
@@ -199,7 +241,7 @@ static FLEObject parse_fle_from_json(const json& j, const std::string& name)
                 }
             } else if (prefix == "❓") {
                 std::string reloc_str = trim(content);
-                std::regex reloc_pattern(R"(\.(rel|abs64|abs|abs32s|gotpcrel)\(([\w.]+)\s*([-+])\s*([0-9a-fA-F]+)\))");
+                std::regex reloc_pattern(R"(\.(rel|abs64|abs|abs32s|gotpcrel|dynrel|dynabs64|dynabs32)\(([\w.@$]+)\s*([-+])\s*([0-9a-fA-FxX]+)\))");
                 std::smatch match;
 
                 if (!std::regex_match(reloc_str, match, reloc_pattern)) {
@@ -209,9 +251,47 @@ static FLEObject parse_fle_from_json(const json& j, const std::string& name)
                 RelocationType type = parse_relocation_type(match[1].str());
                 std::string symbol_name = match[2].str();
                 std::string sign = match[3].str();
-                int64_t append_value = std::stoi(match[4].str(), nullptr, 16);
+                int64_t append_value = parse_addend_literal(match[4].str());
                 if (sign == "-") {
                     append_value = -append_value;
+                }
+
+                auto ensure_symbol_exists = [&](const std::string& name) {
+                    auto it = symbol_table.find(name);
+                    if (it == symbol_table.end()) {
+                        Symbol sym {
+                            SymbolType::UNDEFINED,
+                            "",
+                            0,
+                            0,
+                            name
+                        };
+                        symbol_table[name] = sym;
+                        obj.symbols.push_back(sym);
+                    }
+                };
+
+                bool is_dynamic_reloc = match[1].str().rfind("dyn", 0) == 0;
+                if (is_dynamic_reloc) {
+                    ensure_symbol_exists(symbol_name);
+
+                    auto base_it = section_base_addrs.find(key);
+                    if (base_it == section_base_addrs.end()) {
+                        throw std::runtime_error("Dynamic relocation section has no base address: " + key);
+                    }
+
+                    Relocation reloc {
+                        type,
+                        base_it->second + section.data.size(),
+                        symbol_name,
+                        append_value
+                    };
+
+                    inline_dyn_relocs.push_back(reloc);
+
+                    size_t size = (type == RelocationType::R_X86_64_64) ? 8 : 4;
+                    section.data.insert(section.data.end(), size, 0);
+                    continue;
                 }
 
                 Relocation reloc {
@@ -221,19 +301,7 @@ static FLEObject parse_fle_from_json(const json& j, const std::string& name)
                     append_value
                 };
 
-                auto it = symbol_table.find(symbol_name);
-                if (it == symbol_table.end()) {
-                    // 如果符号不在符号表中，添加为未定义符号
-                    Symbol sym {
-                        SymbolType::UNDEFINED,
-                        "",
-                        0,
-                        0,
-                        symbol_name
-                    };
-                    symbol_table[symbol_name] = sym;
-                    obj.symbols.push_back(sym);
-                }
+                ensure_symbol_exists(symbol_name);
 
                 section.relocs.push_back(reloc);
 
@@ -247,6 +315,12 @@ static FLEObject parse_fle_from_json(const json& j, const std::string& name)
 
         section.name = key;
         obj.sections[key] = section;
+    }
+
+    if (!inline_dyn_relocs.empty()) {
+        obj.dyn_relocs = std::move(inline_dyn_relocs);
+    } else {
+        obj.dyn_relocs = std::move(legacy_dyn_relocs);
     }
 
     return obj;
