@@ -240,6 +240,22 @@ private:
     std::vector<std::string> current_lines;
 };
 
+/**
+ * Generate a PLT stub for the given GOT offset
+ * @param got_offset Offset from the end of the stub to the GOT entry
+ * @return 6-byte machine code for the stub
+ */
+inline std::vector<uint8_t> generate_plt_stub(int32_t got_offset)
+{
+    std::vector<uint8_t> stub = { 0xff, 0x25, 0, 0, 0, 0 };
+    uint32_t off = static_cast<uint32_t>(got_offset);
+    stub[2] = off & 0xff;
+    stub[3] = (off >> 8) & 0xff;
+    stub[4] = (off >> 16) & 0xff;
+    stub[5] = (off >> 24) & 0xff;
+    return stub;
+}
+
 // Core functions that we provide
 FLEObject load_fle(const std::string& filename); // Load FLE file into memory
 void FLE_cc(const std::vector<std::string>& args); // Compile source files to FLE
