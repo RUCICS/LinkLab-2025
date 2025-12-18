@@ -64,7 +64,7 @@ multi_segment = ["11", "12"]
 # 任务六：段权限
 section_perm = ["13", "14"]
 
-# 任务八七：静态链接库
+# 任务七：静态链接库
 static_linking = ["15", "16"]
 
 # Bonus 1：生成共享库

@@ -162,6 +162,7 @@ python3 grader.py -l | source
 1. 手动运行链接器，查看具体输出：
 ```bash
 ./ld ${TEST_BUILD}/a.fo ${TEST_BUILD}/b.fo -o ${TEST_BUILD}/out.fle
+```
 
 2. 使用 `readfle` 和 `disasm` 检查输出文件：
 ```bash
