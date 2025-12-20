@@ -2,7 +2,6 @@ import argparse
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import time
@@ -19,7 +18,7 @@ bootstrap.initialize()
 # -----------------------------------------
 
 import tomli  # noqa: E402
-from rich.console import Console  # noqa: E402
+from rich.console import Console, RenderableType  # noqa: E402
 from rich.panel import Panel  # noqa: E402
 from rich.progress import Progress, SpinnerColumn, Task, TextColumn  # noqa: E402
 from rich.table import Table  # noqa: E402
@@ -196,7 +195,7 @@ class StandardOutputChecker:
 class StatusSpinnerColumn(SpinnerColumn):
     """Spinner that swaps to a custom status icon when provided."""
 
-    def render(self, task: Task) -> Text:
+    def render(self, task: Task) -> RenderableType:
         icon = task.fields.get("status_icon")
         if icon:
             return Text.from_markup(icon)
@@ -605,7 +604,7 @@ class TestRunner:
 
         return self._create_success_result(test, step, score, start_time)
 
-    def _resolve_relative_path(self, path: str, cwd: Path = os.getcwd()) -> str:
+    def _resolve_relative_path(self, path: str, cwd: Path = Path.cwd()) -> str:
         result = path
         if isinstance(path, Path):
             result = str(path.resolve())
@@ -623,7 +622,7 @@ class TestRunner:
 
         return result
 
-    def _resolve_path(self, path: str, test_dir: Path, cwd: Path = os.getcwd()) -> str:
+    def _resolve_path(self, path: str, test_dir: Path, cwd: Path = Path.cwd()) -> str:
         build_dir = test_dir / "build"
         build_dir.mkdir(exist_ok=True)
 
@@ -1025,7 +1024,7 @@ class VSCodeConfigGenerator:
         else:
             raise ValueError(f"Unsupported debug type: {debug_type}")
 
-    def _generate_tasks_config(self, test_case: TestCase) -> Dict[str, Any]:
+    def _generate_tasks_config(self, test_case: TestCase) -> List[Dict[str, Any]]:
         """Generate tasks configuration for building the test case"""
         return [
             {
@@ -1092,7 +1091,7 @@ class VSCodeConfigGenerator:
         with open(file_path, "w") as f:
             json.dump(config_to_write, f, indent=4)
 
-    def _resolve_relative_path(self, path: str, cwd: Path = os.getcwd()) -> str:
+    def _resolve_relative_path(self, path: str, cwd: Path = Path.cwd()) -> str:
         result = path
         if isinstance(path, Path):
             result = str(path.resolve())
@@ -1110,7 +1109,7 @@ class VSCodeConfigGenerator:
 
         return result
 
-    def _resolve_path(self, path: str, test_dir: Path, cwd: Path = os.getcwd()) -> str:
+    def _resolve_path(self, path: str, test_dir: Path, cwd: Path = Path.cwd()) -> str:
         build_dir = test_dir / "build"
         build_dir.mkdir(exist_ok=True)
 
